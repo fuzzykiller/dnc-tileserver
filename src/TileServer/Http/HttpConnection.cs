@@ -19,11 +19,11 @@ namespace TileServer.Http
 
         private readonly byte[] _buffer = new byte[4096];
 
-        private readonly CancellationTokenSource _cancellationTokenSource =
-            new CancellationTokenSource(TimeSpan.FromSeconds(DefaultKeepAliveTimeout));
+        private readonly CancellationTokenSource _cancellationTokenSource = new CancellationTokenSource();
 
         private readonly Action<EndPoint> _removeConnectionFunc;
         private readonly SemaphoreSlim _connectionSemaphore;
+        private readonly SemaphoreSlim _socketSemaphore = new SemaphoreSlim(1, 1);
         private readonly SemaphoreSlim _workSemaphore;
         private readonly Listener.ProcessRequestAsyncCallback _processRequest;
         private readonly Socket _socket;
@@ -61,19 +61,28 @@ namespace TileServer.Http
             }
             finally
             {
+                _socketSemaphore.Dispose();
                 _cancellationTokenSource.Dispose();
                 _socket.Dispose();
                 _closed = true;
             }
         }
 
-        private void OnTimeout()
+        private async void OnTimeout()
         {
+            await _socketSemaphore.WaitAsync().ConfigureAwait(false);
             Close();
         }
 
         private async Task ProcessRequests()
         {
+            var keepAlive = await ProcessRequest();
+            _cancellationTokenSource.CancelAfter(TimeSpan.FromSeconds(DefaultKeepAliveTimeout));
+            if (!keepAlive)
+            {
+                return;
+            }
+
             while (!_cancellationTokenSource.IsCancellationRequested && await ProcessRequest())
             {
             }
@@ -88,15 +97,20 @@ namespace TileServer.Http
             try
             {
                 bytesReceived = await _socket.ReceiveAsync(bufferSegment, SocketFlags.None).ConfigureAwait(false);
+
+                // TODO: Not good enough; a request may have been received but the connection will be closed anyway
+                await _socketSemaphore.WaitAsync().ConfigureAwait(false);
             }
             catch (ObjectDisposedException)
             {
+                _socketSemaphore.Release(1);
                 // Socket was closed, probably by timeout
                 return false;
             }
 
             if (bytesReceived == 0)
             {
+                _socketSemaphore.Release(1);
                 // Socket was probably closed
                 return false;
             }
@@ -105,6 +119,12 @@ namespace TileServer.Http
 
             try
             {
+                // We may be too late and the connection may have timed out from keep-alive
+                if (!_socket.Connected)
+                {
+                    return false;
+                }
+
                 HttpRequest httpRequest = null;
                 try
                 {
@@ -142,6 +162,7 @@ namespace TileServer.Http
             finally
             {
                 _workSemaphore.Release(1);
+                _socketSemaphore.Release(1);
             }
         }
 
