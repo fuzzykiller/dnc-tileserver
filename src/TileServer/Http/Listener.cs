@@ -10,12 +10,13 @@ namespace TileServer.Http
 {
     public sealed class Listener : IDisposable
     {
-        public const int MaxActiveConnections = 10;
+        public const int MaxActiveConnections = 100;
+        public static readonly int MaxActiveWorkers = Environment.ProcessorCount * 4;
 
         public delegate Task ProcessRequestAsyncCallback(HttpRequest request, HttpResponse response);
 
         private readonly SemaphoreSlim _connectionSemaphore = new SemaphoreSlim(MaxActiveConnections, MaxActiveConnections);
-        private readonly SemaphoreSlim _workSemaphore = new SemaphoreSlim(Environment.ProcessorCount, Environment.ProcessorCount);
+        private readonly SemaphoreSlim _workSemaphore = new SemaphoreSlim(MaxActiveWorkers, MaxActiveWorkers);
 
         private readonly ProcessRequestAsyncCallback _processRequest;
         private readonly IPEndPoint _endPoint;
@@ -25,7 +26,8 @@ namespace TileServer.Http
             new Dictionary<EndPoint, HttpConnection>();
 
         private Socket _listenSocket;
-        
+        private SocketAsyncEventArgs _socketAsyncEventArgs;
+
         public Listener(IPEndPoint listeningEndPoint, ProcessRequestAsyncCallback processRequest)
         {
             _endPoint = listeningEndPoint;
@@ -50,51 +52,55 @@ namespace TileServer.Http
 
             _listenSocket = new Socket(_endPoint.AddressFamily, SocketType.Stream, ProtocolType.Tcp);
             _listenSocket.Bind(_endPoint);
-            _listenSocket.Listen(30);
+            _listenSocket.Listen(5);
+            _socketAsyncEventArgs = new SocketAsyncEventArgs();
+            _socketAsyncEventArgs.Completed += AcceptCompleted;
+            StartAccept();
 
-            Task.Run(() => AcceptConnections());
+            //Task.Run(() => AcceptConnections());
+        }
+
+        private void StartAccept()
+        {
+            if (!IsListening)
+            {
+                return;
+            }
+
+            _connectionSemaphore.Wait();
+            _socketAsyncEventArgs.AcceptSocket = null;
+
+            var willRaiseEvent = _listenSocket.AcceptAsync(_socketAsyncEventArgs);
+            if (!willRaiseEvent)
+            {
+                AcceptCompleted(null, _socketAsyncEventArgs);
+            }
+        }
+
+        private void AcceptCompleted(object sender, SocketAsyncEventArgs socketAsyncEventArgs)
+        {
+            if (socketAsyncEventArgs.AcceptSocket != null)
+            {
+                Task.Factory.StartNew(AcceptConnection, socketAsyncEventArgs.AcceptSocket);
+            }
+
+            StartAccept();
         }
 
         public void Stop()
         {
             _listenSocket?.Dispose();
             _listenSocket = null;
+            _socketAsyncEventArgs.Dispose();
+            _socketAsyncEventArgs = null;
 
             // TODO: Wait for workers to finish
         }
 
-        private void AcceptConnections()
+        private void AcceptConnection(object argument)
         {
-            while (IsListening)
-            {
-                _connectionSemaphore.Wait();
+            var socket = (Socket)argument;
 
-                Task<Socket> acceptTask;
-
-                try
-                {
-                    acceptTask = _listenSocket.AcceptAsync();
-                }
-                catch (ObjectDisposedException)
-                {
-                    _connectionSemaphore.Release(1);
-                    return;
-                }
-
-                acceptTask.ContinueWith(AcceptConnection);
-            }
-        }
-
-        private void AcceptConnection(Task<Socket> acceptTask)
-        {
-            if (acceptTask.IsFaulted)
-            {
-                Debug.WriteLine(acceptTask.Exception.GetBaseException());
-                _connectionSemaphore.Release(1);
-                return;
-            }
-
-            var socket = acceptTask.Result;
             Debug.WriteLine($"Accepted connection from {socket.RemoteEndPoint}");
 
             lock (_syncRoot)
