@@ -12,16 +12,16 @@ namespace TileServer.Http
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         // TODO: Make dedicated storage or whatever to avoid needlessly converting
-        public int? ContentLength
+        public long? ContentLength
         {
             get
             {
                 string temp;
-                int result;
+                long result;
                 return _backend.TryGetValue(WellKnownHeaders.ContentLength, out temp) &&
-                       int.TryParse(temp, NumberStyles.None, CultureInfo.InvariantCulture, out result)
+                       long.TryParse(temp, NumberStyles.None, CultureInfo.InvariantCulture, out result)
                     ? result
-                    : default(int?);
+                    : default(long?);
             }
 
             set

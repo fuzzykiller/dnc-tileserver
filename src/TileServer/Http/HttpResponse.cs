@@ -95,5 +95,48 @@ namespace TileServer.Http
 
             HeadersSent = true;
         }
+
+        public async Task Send(Stream stream)
+        {
+            if (!HeadersSent)
+            {
+                if (!Headers.ContentLength.HasValue)
+                {
+                    Headers.ContentLength = stream.Length;
+                }
+
+                await SendHeaders();
+            }
+
+            var buffer = new byte[16384];
+            var bytesToCopy = Headers.ContentLength.Value - TotalBytesSent;
+            var remaining = bytesToCopy;
+
+            if (remaining == 0)
+            {
+                throw new InvalidOperationException($"All data as indicated by Content-length = {Headers.ContentLength} has already been sent.");
+            }
+
+            while (remaining > 0)
+            {
+                var bytesToRead = (int) Math.Min(remaining, buffer.Length);
+                var bytesRead = await stream.ReadAsync(buffer, 0, bytesToRead);
+
+                if (bytesRead == 0)
+                {
+                    break;
+                }
+
+                var bytesSent = 0;
+                do
+                {
+                    bytesSent += await _socket.SendAsync(new ArraySegment<byte>(buffer, bytesSent, bytesRead - bytesSent), SocketFlags.None);
+                } while (bytesSent < bytesRead);
+
+                remaining -= bytesRead;
+            }
+
+            TotalBytesSent += bytesToCopy;
+        }
     }
 }
