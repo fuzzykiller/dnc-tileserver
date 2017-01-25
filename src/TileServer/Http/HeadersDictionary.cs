@@ -6,7 +6,7 @@ using System.Linq;
 
 namespace TileServer.Http
 {
-    internal class HeadersDictionary : IDictionary<string, string>, IReadOnlyDictionary<string, string>
+    public class HeadersDictionary : IDictionary<string, string>, IReadOnlyDictionary<string, string>
     {
         private readonly Dictionary<string, string> _backend =
             new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);

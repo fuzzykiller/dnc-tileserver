@@ -1,5 +1,5 @@
 ﻿using System;
-using System.Collections.Generic;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -11,7 +11,6 @@ namespace TileServer.Http
     {
         private readonly Socket _socket;
         private readonly HttpVersion _httpVersion;
-        private readonly HeadersDictionary _headers;
 
         private HttpStatusCode _statusCode;
 
@@ -19,10 +18,11 @@ namespace TileServer.Http
         {
             _socket = socket;
             _httpVersion = httpVersion;
-            _headers = new HeadersDictionary();
+            _statusCode = HttpStatusCode.OK;
+            Headers = new HeadersDictionary();
         }
 
-        public int TotalBytesSent { get; private set; }
+        public long TotalBytesSent { get; private set; }
 
         public bool HeadersSent { get; private set; }
 
@@ -40,35 +40,35 @@ namespace TileServer.Http
             }
         }
 
-        public IDictionary<string, string> Headers => _headers;
+        public HeadersDictionary Headers { get; }
 
         public bool IsPersistent
         {
             get
             {
-                return HttpUtil.IsConnectionPersistent(_httpVersion, _headers);
+                return HttpUtil.IsConnectionPersistent(_httpVersion, Headers);
             }
             set
             {
                 Headers["Connection"] = value ? "keep-alive" : "close";
             }
         }
-
+        
         public async Task WriteAsync(string s, Encoding encoding)
         {
             var stringBytes = encoding.GetBytes(s);
 
             if (!HeadersSent)
             {
-                if (!_headers.ContentLength.HasValue)
+                if (!Headers.ContentLength.HasValue)
                 {
-                    _headers.ContentLength = stringBytes.Length;
+                    Headers.ContentLength = stringBytes.Length;
                 }
 
                 await SendHeaders();
             }
 
-            var headersContentLength = _headers.ContentLength;
+            var headersContentLength = Headers.ContentLength;
 
             if (TotalBytesSent + stringBytes.Length > headersContentLength)
             {
@@ -82,7 +82,7 @@ namespace TileServer.Http
 
         private async Task SendHeaders()
         {
-            _headers.Freeze();
+            Headers.Freeze();
 
             var headers = new StringBuilder();
             headers.AppendLine($"{HttpUtil.GetVersionString(_httpVersion)} {HttpUtil.GetStatusString(StatusCode)}");
