@@ -146,6 +146,12 @@ namespace TileServer.Http
                 try
                 {
                     await _processRequest(httpRequest, httpResponse).ConfigureAwait(false);
+
+                    if (httpResponse.TotalBytesSent < httpResponse.Headers.ContentLength)
+                    {
+                        // Force close connection if less than promised has been sent.
+                        return false;
+                    }
                 }
                 catch (Exception e)
                 {
