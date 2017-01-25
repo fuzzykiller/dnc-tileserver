@@ -76,14 +76,14 @@ namespace TileServer.Http
 
         private async Task ProcessRequests()
         {
-            var keepAlive = await ProcessRequest();
+            var keepAlive = await ProcessRequest().ConfigureAwait(false);
             _cancellationTokenSource.CancelAfter(TimeSpan.FromSeconds(DefaultKeepAliveTimeout));
             if (!keepAlive)
             {
                 return;
             }
 
-            while (!_cancellationTokenSource.IsCancellationRequested && await ProcessRequest())
+            while (!_cancellationTokenSource.IsCancellationRequested && await ProcessRequest().ConfigureAwait(false))
             {
             }
         }
@@ -115,7 +115,7 @@ namespace TileServer.Http
                 return false;
             }
 
-            await _workSemaphore.WaitAsync();
+            await _workSemaphore.WaitAsync().ConfigureAwait(false);
 
             try
             {
@@ -145,13 +145,13 @@ namespace TileServer.Http
 
                 try
                 {
-                    await _processRequest(httpRequest, httpResponse);
+                    await _processRequest(httpRequest, httpResponse).ConfigureAwait(false);
                 }
                 catch (Exception e)
                 {
                     if (!httpResponse.HeadersSent)
                     {
-                        await SendFatalErrorAndClose(HttpStatusCode.InternalServerError, e.ToString());
+                        await SendFatalErrorAndClose(HttpStatusCode.InternalServerError, e.ToString()).ConfigureAwait(false);
                     }
 
                     return false;
@@ -189,8 +189,8 @@ namespace TileServer.Http
             var headerBytes = Encoding.ASCII.GetBytes(response.ToString());
             var headerSegment = new ArraySegment<byte>(headerBytes);
 
-            await _socket.SendAllAsync(headerSegment, SocketFlags.None);
-            await _socket.SendAllAsync(bodySegment, SocketFlags.None);
+            await _socket.SendAllAsync(headerSegment, SocketFlags.None).ConfigureAwait(false);
+            await _socket.SendAllAsync(bodySegment, SocketFlags.None).ConfigureAwait(false);
             Close();
         }
     }
